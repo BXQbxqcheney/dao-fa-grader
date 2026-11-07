@@ -1,0 +1,104 @@
+{
+    "framework": "pytorch",
+    "task": "ocr-recognition",
+    "model": {
+        "type": "ofa",
+        "beam_search": {
+            "beam_size": 5,
+            "max_len_b": 64,
+            "min_len": 1,
+            "no_repeat_ngram_size": 0
+        },
+        "seed": 7,
+        "max_src_length": 128,
+        "language": "zh",
+        "prompt": "图片上的文字是什么?",
+        "gen_type": "generation",
+        "patch_image_size": 480,
+        "max_image_size": 480,
+        "is_document": false,
+        "imagenet_default_mean_and_std": false
+    },
+    "pipeline": {
+        "type": "ofa-ocr-recognition"
+    },
+    "dataset": {
+        "column_map": {
+            "text": "text",
+            "image": "image"
+        }
+    },
+    "train": {
+        "work_dir": "/tmp",
+        "max_epochs": 1,
+        "use_fp16": false,
+        "dataloader": {
+            "batch_size_per_gpu": 4,
+            "workers_per_gpu": 0
+        },
+        "lr_scheduler": {
+            "name": "polynomial_decay",
+            "warmup_proportion": 0.01,
+            "lr_end": 1e-07
+        },
+        "lr_scheduler_hook": {
+            "type": "LrSchedulerHook",
+            "by_epoch": false
+        },
+        "optimizer": {
+            "type": "AdamW",
+            "lr": 5e-05,
+            "weight_decay": 0.01
+        },
+        "optimizer_hook": {
+            "type": "TorchAMPOptimizerHook",
+            "cumulative_iters": 1,
+            "grad_clip": {
+                "max_norm": 1.0,
+                "norm_type": 2
+            },
+            "loss_keys": "loss"
+        },
+        "criterion": {
+            "name": "AdjustLabelSmoothedCrossEntropyCriterion",
+            "constraint_range": null,
+            "drop_worst_after": 0,
+            "drop_worst_ratio": 0.0,
+            "ignore_eos": false,
+            "ignore_prefix_size": 0,
+            "label_smoothing": 0.1,
+            "reg_alpha": 1.0,
+            "report_accuracy": false,
+            "sample_patch_num": 196,
+            "sentence_avg": false,
+            "use_rdrop": true
+        },
+        "hooks": [
+            {
+                "type": "BestCkptSaverHook",
+                "metric_key": "accuracy",
+                "interval": 100
+            },
+            {
+                "type": "TextLoggerHook",
+                "interval": 1
+            },
+            {
+                "type": "IterTimerHook"
+            }
+        ]
+    },
+    "evaluation": {
+        "dataloader": {
+            "batch_size_per_gpu": 4,
+            "workers_per_gpu": 0
+        },
+        "metrics": [
+            {
+                "type": "accuracy"
+            }
+        ]
+    },
+    "preprocessor": [],
+    "allow_remote": true
+}

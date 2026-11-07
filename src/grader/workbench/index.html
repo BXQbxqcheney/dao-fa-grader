@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>道法主观题智能判卷 · 试判工作台</title>
+<style>
+  :root {
+    --bg: #fafafa; --card: #ffffff; --border: #eaeaea; --text: #111;
+    --muted: #666; --accent: #0070f3; --ok: #0f9d58; --warn: #f5a623; --err: #d0021b;
+    --radius: 10px; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; line-height: 1.6; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  h1 { font-size: 22px; font-weight: 600; }
+  .health { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--err); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  .right-col { display: flex; flex-direction: column; gap: 16px; }
+  .stage { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: 13px; }
+  .stage summary { display: flex; gap: 8px; align-items: center; cursor: pointer; list-style: none; }
+  .stage summary::-webkit-details-marker { display: none; }
+  .stage .st-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); flex: none; }
+  .stage.running .st-dot { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+  .stage.done .st-dot { background: var(--ok); }
+  .stage .st-name { font-weight: 600; }
+  .stage .st-brief { color: var(--muted); font-size: 12px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .stage .st-detail { color: var(--text); font-size: 12px; margin-top: 6px;
+    white-space: pre-wrap; word-break: break-all; border-top: 1px dashed var(--border); padding-top: 6px; }
+  .stage .io-label { display: inline-block; font-weight: 600; color: var(--muted);
+    margin: 6px 0 2px; font-size: 11px; }
+  .stage .io pre { margin: 0; background: #f6f6f6; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+    font-family: var(--mono); font-size: 11px; }
+  .stage .io img { max-width: 100%; max-height: 200px; border: 1px solid var(--border);
+    border-radius: 6px; margin-top: 4px; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=number], textarea {
+    width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    font-size: 14px; font-family: inherit; background: #fff; }
+  textarea { resize: vertical; min-height: 56px; }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .drop { border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 18px;
+    text-align: center; color: var(--muted); font-size: 13px; cursor: pointer; transition: border-color .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--accent); }
+  .preview { max-width: 100%; max-height: 260px; border: 1px solid var(--border);
+    border-radius: 8px; margin-top: 10px; display: none; }
+  .sp-row { display: grid; grid-template-columns: 64px 1fr 96px 32px; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; border: none; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; cursor: pointer; background: var(--text); color: #fff; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.ghost { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+  .actions { margin-top: 16px; display: flex; gap: 10px; }
+  .score-big { font-size: 40px; font-weight: 700; font-family: var(--mono); }
+  .score-big small { font-size: 15px; color: var(--muted); font-weight: 400; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+  .badge.hit { background: #e6f4ea; color: var(--ok); }
+  .badge.miss { background: #fdecea; color: var(--err); }
+  .point { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 8px 0; }
+  .point .head { display: flex; justify-content: space-between; font-size: 13px; }
+  .evidence { margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .evidence em { font-style: normal; color: var(--text); }
+  .deduction { font-size: 13px; color: #8a4b08; background: #fdf6e3; border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+  .reason { margin-top: 12px; font-size: 13px; border-left: 3px solid var(--border); padding-left: 10px; color: var(--muted); white-space: pre-wrap; }
+  .meta { margin-top: 12px; font-size: 12px; color: var(--muted); font-family: var(--mono); }
+  .status-needs { border-left: 4px solid var(--warn); padding-left: 12px; }
+  .hidden { display: none; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff;
+    border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .err-box { border: 1px solid #f3c2c2; background: #fdf2f2; color: var(--err);
+    border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+  .kv { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: var(--mono); }
+  svg { vertical-align: -2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>道法主观题智能判卷 · 试判工作台</h1>
+    <span class="health"><span class="dot" id="healthDot"></span><span id="healthText">检查服务中…</span></span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>1 · 作答图片</h2>
+      <div class="drop" id="drop">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        点击选择 / 拖入 / 粘贴作答图片（JPEG · PNG · WebP，≤10MB）
+        <input type="file" id="file" accept="image/jpeg,image/png,image/webp" class="hidden" />
+      </div>
+      <img id="preview" class="preview" alt="作答图片预览" />
+      <div class="kv" id="imgMeta"></div>
+
+      <h2 style="margin-top:18px">2 · 判卷标准</h2>
+      <label>题号</label>
+      <input type="text" id="question_id" placeholder="如 Q18（可留空）" />
+      <label>满分 <span style="color:var(--err)">*</span></label>
+      <input type="number" id="max_score" step="0.5" min="0.5" placeholder="如 6" />
+      <label>题干 <span style="color:var(--err)">*</span></label>
+      <textarea id="question_stem" placeholder="结合材料，谈谈青少年应如何……"></textarea>
+      <label>参考答案 <span style="color:var(--err)">*</span></label>
+      <textarea id="reference_answer" placeholder="参考答案全文"></textarea>
+
+      <label>得分点（描述 + 分值）<span style="color:var(--err)">*</span></label>
+      <div id="points"></div>
+      <button class="btn ghost small" id="addPoint" type="button">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        添加得分点</button>
+
+      <label>扣分规则（每行一条）<span style="color:var(--err)">*</span></label>
+      <textarea id="deduction_rules" placeholder="未结合材料扣 1 分&#10;照抄题目不给分"></textarea>
+
+      <label>判分准则（每行一条，可空；如：与得分点接近得一半分）</label>
+      <textarea id="grading_rules" placeholder="与得分点完全一致得满分&#10;与得分点接近得一半分&#10;未涉及该得分点得 0 分"></textarea>
+
+      <div class="actions">
+        <button class="btn" id="submit">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          提交判卷
+        </button>
+        <button class="btn ghost" id="reset" type="button">重置</button>
+      </div>
+      <div class="kv">页面不保存任何数据，仅调用本机 API；密钥只存在于服务端环境变量。</div>
+    </div>
+
+    <div class="right-col">
+      <div class="card" id="progressCard">
+        <h2>3 · 实时进度</h2>
+        <div id="progressEmpty" style="color:var(--muted);font-size:13px;">提交请求后在此显示各阶段进度。</div>
+        <div id="progressList" class="hidden"></div>
+      </div>
+
+      <div class="card" id="resultCard">
+        <h2>4 · 判卷结果</h2>
+        <div id="resultEmpty" style="color:var(--muted);font-size:13px;">提交请求后在此显示结果。</div>
+        <div id="resultLoading" class="hidden" style="color:var(--muted);font-size:13px;">
+          <span class="spinner" style="border-color:var(--accent);border-top-color:transparent;"></span>
+          正在判卷…
+          <button id="cancelBtn" class="btn ghost small" type="button" style="margin-left:10px">取消</button>
+        </div>
+        <div id="resultGraded" class="hidden"></div>
+        <div id="resultNeeds" class="hidden"></div>
+        <div id="resultError" class="hidden"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let imageDataUrl = "";
+
+/* ---------- 服务健康 ---------- */
+fetch("/healthz").then(r => r.ok ? r.json() : Promise.reject())
+  .then(() => { $("healthDot").classList.add("ok"); $("healthText").textContent = "服务正常"; })
+  .catch(() => { $("healthDot").classList.add("bad"); $("healthText").textContent = "服务不可达"; });
+
+/* ---------- 图片选择 / 拖拽 / 粘贴 ---------- */
+function setImage(dataUrl, name) {
+  imageDataUrl = dataUrl;
+  const img = $("preview");
+  img.src = dataUrl; img.style.display = "block";
+  img.onload = () => { $("imgMeta").textContent =
+    name + " · " + img.naturalWidth + "×" + img.naturalHeight + " px · " + (dataUrl.length / 1024 / 1024 * 0.75).toFixed(2) + " MB(约)"; };
+}
+$("drop").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) readAsDataURL(f); });
+["dragover", "dragenter"].forEach(ev => $("drop").addEventListener(ev, (e) => { e.preventDefault(); $("drop").classList.add("over"); }));
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+$("drop").addEventListener("drop", (e) => {
+  e.preventDefault(); $("drop").classList.remove("over");
+  const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) readAsDataURL(f);
+});
+window.addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData ? e.clipboardData.items : [])].find(i => i.type.startsWith("image/"));
+  if (item) readAsDataURL(item.getAsFile());
+});
+function readAsDataURL(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { alert("仅支持 JPEG / PNG / WebP"); return; }
+  const reader = new FileReader();
+  reader.onload = () => setImage(reader.result, file.name || "剪贴板图片");
+  reader.readAsDataURL(file);
+}
+
+/* ---------- 得分点动态行 ---------- */
+function addPointRow(desc, score) {
+  const row = document.createElement("div");
+  row.className = "sp-row";
+  const idx = $("points").children.length + 1;
+  row.innerHTML =
+    '<input type="text" class="sp-id" value="P' + idx + '" aria-label="编号" />' +
+    '<input type="text" class="sp-desc" placeholder="得分点描述，如：指出树立远大理想的重要性" aria-label="描述" />' +
+    '<input type="number" class="sp-score" step="0.5" min="0.5" placeholder="分值" aria-label="分值" />' +
+    '<button type="button" class="btn ghost small sp-del" title="删除">−</button>';
+  row.querySelector(".sp-del").addEventListener("click", () => row.remove());
+  if (desc !== undefined) row.querySelector(".sp-desc").value = desc;
+  if (score !== undefined) row.querySelector(".sp-score").value = score;
+  $("points").appendChild(row);
+}
+addPointRow("", 2); addPointRow("", 4);
+$("addPoint").addEventListener("click", () => addPointRow());
+
+/* ---------- 表单 → 请求体 ---------- */
+function buildPayload() {
+  const rules = $("deduction_rules").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const gRules = $("grading_rules").value.split("\n").map(s => s.trim()).filter(Boolean);
+  return {
+    image_base64: imageDataUrl,
+    criteria: {
+      question_id: $("question_id").value.trim() || null,
+      max_score: parseFloat($("max_score").value),
+      question_stem: $("question_stem").value,
+      reference_answer: $("reference_answer").value,
+      scoring_points: [...$("points").children].map(row => ({
+        id: row.querySelector(".sp-id").value.trim(),
+        description: row.querySelector(".sp-desc").value.trim(),
+        score: parseFloat(row.querySelector(".sp-score").value),
+      })).filter(p => p.description && !isNaN(p.score)),
+      deduction_rules: rules,
+      grading_rules: gRules,
+    },
+    options: { return_ocr_text: true },
+  };
+}
+function clientValidate(p) {
+  if (!p.image_base64) return "请先提供作答图片";
+  if (!(p.criteria.max_score > 0)) return "请填写满分（大于 0，0.5 的整数倍）";
+  if (!p.criteria.scoring_points.length) return "请至少填写一个得分点";
+  return null;
+}
+
+/* ---------- 实时进度 ---------- */
+const stageRows = new Map();   // stage 名 → DOM 行
+function progressReset() {
+  stageRows.clear();
+  $("progressList").innerHTML = "";
+  $("progressList").classList.remove("hidden");
+  $("progressEmpty").classList.add("hidden");
+}
+function progressUpdate(stage, status, detail, input, output, inputKind) {
+  let row = stageRows.get(stage);
+  if (!row) {
+    row = document.createElement("details");
+    row.className = "stage";
+    row.innerHTML = '<summary><span class="st-dot"></span><span class="st-name"></span>' +
+                    '<span class="st-brief"></span></summary>' +
+                    '<div class="st-detail"></div>';
+    row.querySelector(".st-name").textContent = stage;
+    $("progressList").appendChild(row);
+    stageRows.set(stage, row);
+  }
+  row.classList.remove("running", "done");
+  if (status === "running") row.classList.add("running");
+  else if (status === "done") row.classList.add("done");
+  const d = detail || "";
+  // 摘要取首行；完整内容进可展开区（不裁剪，有多少显示多少）
+  row.querySelector(".st-brief").textContent = d.split("\n")[0];
+
+  // 可展开区：发给 AI 的完整输入 + AI 的原始返回（AIOCR 项内嵌图片预览）
+  const box = row.querySelector(".st-detail");
+  box.innerHTML = "";
+  if (input !== undefined && input !== null) {
+    const divIn = document.createElement("div");
+    divIn.className = "io";
+    divIn.innerHTML = '<span class="io-label">发给 AI 的输入</span>';
+    if (inputKind === "image") {
+      const img = document.createElement("img");
+      img.src = imageDataUrl; img.alt = "发给 AI 的作答图片";
+      divIn.appendChild(img);
+    } else {
+      const pre = document.createElement("pre");
+      pre.textContent = input;
+      divIn.appendChild(pre);
+    }
+    box.appendChild(divIn);
+  }
+  if (output !== undefined && output !== null && output !== "") {
+    const divOut = document.createElement("div");
+    divOut.className = "io";
+    divOut.innerHTML = '<span class="io-label">AI 的原始返回</span>';
+    const pre = document.createElement("pre");
+    pre.textContent = output;
+    divOut.appendChild(pre);
+    box.appendChild(divOut);
+  }
+  if (!box.children.length) box.textContent = d;
+  if (status === "running") row.open = true;   // 进行中的阶段自动展开，完成后保持展开，可手动收起
+}
+
+/* ---------- 提交与渲染（SSE 流式） ---------- */
+let currentAbort = null;
+$("cancelBtn").addEventListener("click", () => { if (currentAbort) currentAbort.abort(); });
+
+$("submit").addEventListener("click", async () => {
+  const payload = buildPayload();
+  const problem = clientValidate(payload);
+  if (problem) { showError(problem); return; }
+  const btn = $("submit");
+  btn.disabled = true;                     // 请求期间禁用，防重复提交
+  currentAbort = new AbortController();    // 用户可中止
+  progressReset();
+  showSection("loading");
+  try {
+    const resp = await fetch("/api/v1/grade/stream", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: currentAbort.signal,
+    });
+    const ctype = resp.headers.get("content-type") || "";
+    if (!resp.ok || !ctype.includes("event-stream")) {
+      const j = await resp.json().catch(() => ({}));
+      showError((j.error && j.error.message) || ("HTTP " + resp.status), j.error && j.error.code);
+      return;
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 2);
+        const line = chunk.split("\n").find(l => l.startsWith("data: "));
+        if (!line) continue;
+        handleEvent(JSON.parse(line.slice(6)));
+      }
+    }
+  } catch (err) {
+    if (err.name === "AbortError") showSection("empty");
+    else showError("请求失败：" + err.message);
+  } finally {
+    btn.disabled = false;
+    currentAbort = null;
+  }
+});
+
+function handleEvent(evt) {
+  if (evt.type === "stage") {
+    progressUpdate(evt.stage, evt.status, evt.detail, evt.input, evt.output, evt.input_kind);
+  } else if (evt.type === "result") {
+    const d = evt.data;
+    if (d.status === "graded") renderGraded(d);
+    else if (d.status === "needs_human") renderNeeds(d);
+    else showError((d.error && d.error.message) || ("HTTP " + (evt.http_status || "?")), d.error && d.error.code);
+  }
+}
+$("reset").addEventListener("click", () => {
+  ["question_id", "max_score", "question_stem", "reference_answer", "deduction_rules", "grading_rules"]
+    .forEach(id => $(id).value = "");
+  $("points").innerHTML = ""; addPointRow("", 2); addPointRow("", 4);
+  imageDataUrl = ""; $("preview").style.display = "none"; $("imgMeta").textContent = "";
+  stageRows.clear(); $("progressList").innerHTML = "";
+  $("progressList").classList.add("hidden"); $("progressEmpty").classList.remove("hidden");
+  showSection("empty");
+});
+function showSection(name) {
+  ["Empty", "Loading", "Graded", "Needs", "Error"].forEach(n => $("result" + n).classList.add("hidden"));
+  if (name === "graded") $("resultGraded").classList.remove("hidden");
+  else if (name === "needs") $("resultNeeds").classList.remove("hidden");
+  else if (name === "error") $("resultError").classList.remove("hidden");
+  else if (name === "loading") $("resultLoading").classList.remove("hidden");
+  else $("resultEmpty").classList.remove("hidden");
+}
+function showError(message, code) {
+  $("resultError").innerHTML = '<div class="err-box"><strong>' + (code || "ERROR") + "</strong> — " + escapeHtml(message) + "</div>";
+  showSection("error");
+}
+function escapeHtml(s) { const d = document.createElement("div"); d.textContent = String(s); return d.innerHTML; }
+
+function renderGraded(d) {
+  const points = d.scoring_points.map(p =>
+    '<div class="point"><div class="head"><span><strong>' + escapeHtml(p.id) + "</strong> " +
+    escapeHtml(p.criterion) + "</span><span>" +
+    '<span class="badge ' + (p.hit ? "hit" : "miss") + '">' + (p.hit ? "命中" : "未命中") + "</span> " +
+    p.awarded_score + " / " + p.max_score + " 分</span></div>" +
+    (p.evidence ? '<div class="evidence">依据：<em>' + escapeHtml(p.evidence) + "</em></div>" : "") +
+    "</div>").join("");
+  const deductions = (d.deductions || []).map(x =>
+    '<div class="deduction">扣 ' + x.points + " 分：" + escapeHtml(x.reason) + "</div>").join("") ||
+    '<div class="deduction" style="background:#f2f2f2;color:var(--muted)">无扣分项</div>';
+  $("resultGraded").innerHTML =
+    '<div class="score-big">' + d.score + ' <small>/ ' + d.max_score + " 分</small></div>" +
+    points + deductions +
+    '<div class="reason">' + escapeHtml(d.reason) + "</div>" +
+    '<div class="meta">request_id=' + escapeHtml(d.request_id) +
+    " · ocr.confidence=" + (d.ocr.confidence == null ? "—" : d.ocr.confidence.toFixed(3)) +
+    " · removed_marks=" + d.ocr.removed_marks +
+    " · " + escapeHtml(d.model.provider + "/" + d.model.name) + "</div>";
+  showSection("graded");
+}
+function renderNeeds(d) {
+  $("resultNeeds").innerHTML =
+    '<div class="status-needs"><strong>需人工处理</strong></div>' +
+    '<div class="meta" style="margin-top:6px">reason_code=' + escapeHtml(d.reason_code) + "</div>" +
+    '<div style="margin-top:8px;font-size:13px;">' + escapeHtml(d.message) + "</div>" +
+    (d.ocr && d.ocr.text ? '<div class="reason">OCR 片段：<br>' + escapeHtml(d.ocr.text) + "</div>" : "") +
+    '<img src="' + escapeHtml(d.image_url) + '" class="preview" style="display:block;margin-top:10px" alt="原图回显" />';
+  showSection("needs");
+}
+</script>
+</body>
+</html>

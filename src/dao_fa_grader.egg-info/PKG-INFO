@@ -1,0 +1,182 @@
+Metadata-Version: 2.4
+Name: dao-fa-grader
+Version: 0.1.0
+Summary: 道法（道德与法治）主观题智能判卷服务：手写 OCR + 置信度分流 + LLM 依标判分，低置信度不判、每分必有原文依据。
+Author: dao-fa-grader contributors
+License: AGPL-3.0-or-later
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastapi>=0.115
+Requires-Dist: uvicorn>=0.30
+Requires-Dist: pydantic>=2.7
+Requires-Dist: openai>=1.40
+Requires-Dist: anthropic>=0.34
+Requires-Dist: pillow>=10.0
+Requires-Dist: numpy>=1.26
+Requires-Dist: rapidocr-onnxruntime>=1.4
+Provides-Extra: ofa
+Requires-Dist: torch>=2.0; extra == "ofa"
+Requires-Dist: modelscope>=1.20; extra == "ofa"
+Requires-Dist: transformers>=4.46; extra == "ofa"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: httpx>=0.27; extra == "dev"
+Dynamic: license-file
+
+# dao-fa-grader · 道法主观题智能判卷服务
+
+> 版本 **0.1.0**（单点定义于 `pyproject.toml`）｜许可证 **AGPL-3.0-or-later**
+> 手写 OCR + 置信度分流 + 大模型依标判分。核心边界：**低置信度不判、不自行修复、每分必有原文依据、0.5 分步长**。
+
+本服务**不是大模型**：通过标准 API 接入你自有的大模型（OpenAI 兼容 / Anthropic），
+本地负责图像预处理、行切分、涂改剔除、手写 OCR 与置信度分流；OCR 不可靠时明确返回
+`needs_human` 转人工，绝不做猜测性判分。完整契约见 [docs/SPEC.md](docs/SPEC.md) 与 [docs/API.md](docs/API.md)。
+
+## 快速开始
+
+### 1. 环境准备
+
+```bash
+# Python ≥ 3.10（推荐 3.12）；GPU 推荐但非必需
+cd dao-fa-grader
+python -m pip install -e ".[dev]"        # 基础依赖 + 测试依赖
+python -m pip install -e ".[ofa]"        # 可选：使用 OFA 中文手写 OCR 时安装（torch/modelscope/transformers）
+cp .env.example .env                     # 填入大模型密钥；.env 已被 .gitignore 覆盖
+```
+
+OFA 模型权重（约 700MB）**不随仓库分发**：放到本仓库同级 `ocr/` 目录（含 `config.json` /
+`pytorch_model.bin`），或用环境变量 `OFA_MODEL_PATH` 指向任意本地权重目录。
+
+### 2. 启动
+
+```bash
+uvicorn grader.main:app --host 0.0.0.0 --port 8000
+```
+
+- 工作台：浏览器打开 <http://127.0.0.1:8000/workbench/>（上传图片 → 填判卷标准 → 看结果）。
+- 健康检查：`curl http://127.0.0.1:8000/healthz` → `{"status":"ok"}`
+
+### 3. 一次完整的 curl 调用
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/v1/grade \
+  -H 'Content-Type: application/json' \
+  -d @- <<'EOF'
+{
+  "image_base64": "data:image/png;base64,<你的作答图Base64>",
+  "criteria": {
+    "question_id": "Q18",
+    "max_score": 6,
+    "question_stem": "结合材料，谈谈青少年应如何将个人梦想与国家发展结合起来。",
+    "reference_answer": "①树立远大理想；②结合材料说明具体行动。",
+    "scoring_points": [
+      { "id": "P1", "description": "指出树立远大理想的重要性", "score": 2 },
+      { "id": "P2", "description": "结合材料说明具体行动", "score": 4 }
+    ],
+    "deduction_rules": ["未结合材料扣 1 分", "照抄题目不给分"]
+  },
+  "options": { "return_ocr_text": true }
+}
+EOF
+```
+
+### 4. 返回示例
+
+可判（`status=graded`）：
+
+```json
+{
+  "request_id": "req_20261107_9f3a2b1c",
+  "status": "graded",
+  "question_id": "Q18",
+  "max_score": 6,
+  "score": 5,
+  "scoring_points": [
+    { "id": "P1", "criterion": "指出树立远大理想的重要性",
+      "evidence": "“我们要树立远大理想，把个人梦想和国家发展结合起来”", "hit": true,
+      "awarded_score": 2, "max_score": 2 },
+    { "id": "P2", "criterion": "结合材料说明具体行动",
+      "evidence": "“在学校认真学习，参加志愿服务”", "hit": true, "awarded_score": 3, "max_score": 4 }
+  ],
+  "deductions": [ { "reason": "未结合材料中的具体人物事例", "points": 1 } ],
+  "reason": "学生答出了理想与行动，但未结合材料中的具体人物事例，扣 1 分，故得 5 分。",
+  "ocr": { "text": "整理后的作答文本", "confidence": 0.91, "removed_marks": 2, "resized": false },
+  "model": { "provider": "openai", "name": "gpt-4o-mini" }
+}
+```
+
+不可判（`status=needs_human`，HTTP 200，原图回传）：
+
+```json
+{
+  "request_id": "req_20261107_7c1d0e22",
+  "status": "needs_human",
+  "reason_code": "low_ocr_confidence",
+  "message": "OCR 置信度 0.38 低于阈值 0.5，需人工判卷",
+  "image_url": "data:image/png;base64,iVBORw0KGgo...",
+  "ocr": { "text": "识别片段", "confidence": 0.38, "removed_marks": 0, "resized": false }
+}
+```
+
+系统错误（4xx/5xx，与 needs_human 严格互斥）：`{"error": {"code": "…", "message": "…", "request_id": "…"}}`。
+全部错误码见 [docs/API.md](docs/API.md)。
+
+## 模型配置说明
+
+| 变量组 | 说明 |
+|---|---|
+| `LLM_PROVIDER=openai \| anthropic` | 判分/整理由哪个大模型完成 |
+| `OPENAI_API_KEY` `OPENAI_BASE_URL` `OPENAI_MODEL` | OpenAI 兼容接入（兼容网关亦可） |
+| `ANTHROPIC_API_KEY` `ANTHROPIC_MODEL` | Anthropic 接入 |
+| `OCR_PROVIDER=ofa \| rapidocr` | OCR 引擎切换（均完整实现） |
+| `OCR_CONFIDENCE_THRESHOLD=0.5` | 两引擎同语义使用，低于即转人工 |
+| `OFA_MODEL_PATH` | OFA 权重目录（默认探测仓库同级 `ocr/`） |
+
+密钥只经环境变量注入，禁止写入代码、示例与日志。切换供应商只需改环境变量（AC7）。
+
+## 硬件与性能预期
+
+- **GPU 推荐**：OFA 为 700MB 视觉-语言模型，单行推理在 RTX 4060 级 GPU 上约百毫秒级；
+  **CPU 可运行**但逐行推理显著变慢（秒级/行）。
+- 超时预算：OCR ≤ 10s（`OCR_TIMEOUT_SECONDS`）、大模型单次 ≤ 20s（`LLM_TIMEOUT_SECONDS`）、
+  请求总闸 60s（`REQUEST_TIMEOUT_SECONDS`）；OCR 超时 → 500 `OCR_ERROR`，大模型超时 → 504 `LLM_TIMEOUT`。
+- OCR 线程池并发默认 2（`OCR_CONCURRENCY`）；大模型调用异步。
+- 60s 总预算内最多发生：1 次整理 + 2 次判分（含一次重试）；若整体超时返回 500 `INTERNAL_ERROR`。
+
+## 判分语义（重要）
+
+- `score = max_score − Σdeductions`，服务端计算，恒在 `[0, max_score]`；
+  `awarded_score` 为逐点诊断值，一致性约束 `Σawarded = 满分 − Σdeductions`（不符自动重试一次）。
+- 得分点分值之和 ≠ 满分**不会**被拒绝：之和小于满分属正常（缺额以扣分体现，不自动给出）；
+  之和超过满分时封顶并在 `reason` 注明。
+- 所有分值为 0.5 的整数倍，其余小数直接 400。
+- 学生作答按不可信数据处理（`<student_answer>` 隔离注入 + 固定声明），提示词注入不生效。
+
+## 测试
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest            # 单元 + API 契约（Fake OCR/LLM，无外部依赖）
+RUN_OFA_TESTS=1 python -m pytest tests/test_engines_integration.py -k ofa   # OFA 实测（加载 700MB 权重）
+```
+
+## 目录结构
+
+见 [docs/SPEC.md](docs/SPEC.md) §7。工程要点：配置单源（`core/config.py`）、错误体系统一
+（`core/errors.py`）、JSON 多级容错解析（`grading/parser.py`）、双 OCR 统一 0~1 置信度口径
+（`ocr/base.py`）、依赖注入可测试（`main.create_app`）。
+
+## 复用优先走查记录
+
+【复用优先走查】需求：道法主观题 LLM 判卷服务（OCR + 置信度分流 + 依标判分）。
+第 1 级 本地库：`find.py` 检索 判卷/判分/OCR/手写识别/图像识别/FastAPI/Python服务 —— 仅命中
+无关的「隐私打码 OCR 工具」（新小工具集合），无 ≥70% 契合资产。未命中。
+第 2 级 开源：EvaluAI（整平台）、Moodle 手写评分流水线（LMS 集成）、AWESOME-OCR-LLM（清单）、
+olmOCR（文档 OCR）—— 均为整平台/整 LMS 形态，与「单题 HTTP + needs_human 分流」契合度不足。未采用。
+结论：第 3 级自研本仓库；工程模式借鉴（JSON 多级容错链、密钥仅环境变量）为通用实践移植。
+
+## 许可证
+
+AGPL-3.0-or-later，全文见 [LICENSE](LICENSE)。模型权重不随仓库分发；示例与测试不包含任何
+真实密钥、学校信息或学生个人信息。

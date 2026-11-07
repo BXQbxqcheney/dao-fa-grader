@@ -1,0 +1,44 @@
+[project]
+name = "dao-fa-grader"
+version = "0.2.0"
+description = "道法（道德与法治）主观题智能判卷服务：手写 OCR + 置信度分流 + LLM 依标判分，低置信度不判、每分必有原文依据。"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.10"
+authors = [{ name = "白崇义（白小谦）", email = "bcybxq@163.com" }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.7",
+    "openai>=1.40",
+    "anthropic>=0.34",
+    "pillow>=10.0",
+    "numpy>=1.26",
+    "rapidocr-onnxruntime>=1.4",
+]
+
+[project.optional-dependencies]
+# OFA 中文手写 OCR 属重依赖（torch/modelscope/transformers），按需安装
+ofa = [
+    "torch>=2.0",
+    "modelscope>=1.20",
+    "transformers>=4.46",
+]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+grader = ["workbench/*.html", "workbench/*.js", "workbench/*.css"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
